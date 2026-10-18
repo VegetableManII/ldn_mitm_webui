@@ -7,6 +7,7 @@ import ipaddress
 import json
 import logging
 import os
+import queue
 from pathlib import Path
 import secrets
 import socket
@@ -35,6 +36,52 @@ class Monitor(logging.Handler):
         self.running = False
         self.error = None
         self.discovery = Rooms(names_file)
+        self.discovery_lock = threading.RLock()
+        self.observations = queue.Queue(maxsize=128)
+        self.observation_dropped = 0
+        self.observation_errors = 0
+        self.observer_stop = threading.Event()
+        self.observer = None
+        self.room_cache = []
+        self.advertisement_cache = 0
+
+    def start_observer(self):
+        if self.observer is None:
+            self.observer = threading.Thread(target=self._observe, name="room-observer", daemon=True)
+            self.observer.start()
+
+    def _observe(self):
+        while not self.observer_stop.is_set():
+            try:
+                data, endpoint, received_at = self.observations.get(timeout=.2)
+            except queue.Empty:
+                continue
+            try:
+                # Old UI updates are expendable; never revive an expired room.
+                if time.time() - received_at <= 5:
+                    with self.discovery_lock:
+                        self.discovery.observe(data, endpoint, received_at)
+                else:
+                    self.observation_dropped += 1
+            except Exception:
+                self.observation_errors += 1
+            finally:
+                self.observations.task_done()
+
+    def enqueue_observation(self, data, addr, received_at):
+        # Header-only filter. Never decode, decompress or wait here.
+        if not data or data[0] not in (1, 3):
+            return
+        if data[0] == 1:
+            if len(data) < 29 or data[1] >> 4 != 4 or data[10] != 17:
+                return
+            udp = 1 + (data[1] & 15) * 4
+            if udp < 21 or len(data) < udp + 8 or data[udp + 2:udp + 4] != b"\x2c\xbc":
+                return
+        try:
+            self.observations.put_nowait((data, f"{addr[0]}:{addr[1]}", received_at))
+        except queue.Full:
+            self.observation_dropped += 1
 
     def permits(self, ip):
         return not self.networks or any(ipaddress.ip_address(ip) in n for n in self.networks)
@@ -57,7 +104,6 @@ class Monitor(logging.Handler):
                                     or (data[0] == 3 and len(data) >= 17))
             if not valid:
                 return
-            self.discovery.observe(data, f"{addr[0]}:{addr[1]}", now)
             for key in list(self.clients):
                 if now - self.clients[key]["last_seen"] > 60:
                     del self.clients[key]
@@ -89,6 +135,14 @@ class Monitor(logging.Handler):
 
     def snapshot(self, port):
         now = time.time()
+        # Mapping-file IO and room parsing cannot hold up the relay's stats lock.
+        # If the observer is busy, use the last UI snapshot and retry next refresh.
+        if self.discovery_lock.acquire(blocking=False):
+            try:
+                self.room_cache = self.discovery.snapshot(now)
+                self.advertisement_cache = self.discovery.advertisements
+            finally:
+                self.discovery_lock.release()
         with self.lock:
             clients = [dict(c, idle_seconds=round(now - c["last_seen"], 1))
                        for c in self.clients.values() if now - c["last_seen"] <= 60]
@@ -100,14 +154,18 @@ class Monitor(logging.Handler):
                     "packets_rx": self.packets_rx, "packets_tx": self.packets_tx,
                     "rejected": self.rejected, "allowlist_enabled": bool(self.networks),
                     "events": list(self.events), "history": list(self.history),
-                    "rooms": self.discovery.snapshot(now),
-                    "room_advertisements": self.discovery.advertisements}
+                    "rooms": self.room_cache,
+                    "room_advertisements": self.advertisement_cache,
+                    "room_observer": {"queued": self.observations.qsize(),
+                                      "dropped": self.observation_dropped,
+                                      "errors": self.observation_errors}}
 
 
 class TrackedSocket:
     def __init__(self, monitor, *args, **kwargs):
         self.monitor = monitor
         self.sock = socket.socket(*args, **kwargs)
+        self.pending_observation = None
 
     def __getattr__(self, key):
         return getattr(self.sock, key)
@@ -118,6 +176,11 @@ class TrackedSocket:
         self.monitor.event(f"中继监听 UDP {addr[0]}:{addr[1]}")
 
     def recvfrom(self, size):
+        # Upstream calls recvfrom only after it finishes routing the previous
+        # datagram. Hand that immutable byte buffer to the UI worker now.
+        if self.pending_observation is not None:
+            self.monitor.enqueue_observation(*self.pending_observation)
+            self.pending_observation = None
         while True:
             data, addr = self.sock.recvfrom(size)
             if not self.monitor.permits(addr[0]):
@@ -125,6 +188,7 @@ class TrackedSocket:
                     self.monitor.rejected += 1
                 continue
             self.monitor.received(data, addr)
+            self.pending_observation = (data, addr, time.time())
             return data, addr
 
     def sendto(self, data, addr):
@@ -134,6 +198,7 @@ class TrackedSocket:
 
 
 def start_relay(monitor, port):
+    monitor.start_observer()
     spec = importlib.util.spec_from_file_location("upstream_relay", ROOT / "vendor/relay_server.py")
     relay = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(relay)
@@ -235,7 +300,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not 1 <= length <= 2048:
                     raise ValueError("请求大小无效")
                 data = json.loads(self.rfile.read(length))
-                with self.server.monitor.lock:
+                with self.server.monitor.discovery_lock:
                     self.server.monitor.discovery.set_name(data.get("lcid", ""), data.get("name", ""))
             except (ValueError, AttributeError) as exc:
                 return self.reply(400, {"error": str(exc)})
@@ -311,6 +376,7 @@ def main():
         pass
     finally:
         server.server_close()
+        monitor.observer_stop.set()
 
 
 if __name__ == "__main__":
