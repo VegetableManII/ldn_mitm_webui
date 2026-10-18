@@ -1,6 +1,6 @@
 # LDN Relay Web UI
 
-为 dogty/ldn_mitm 的免电脑 UDP 中继添加中文管理页面。Python **3.10+**，仅使用标准库，无须 pip 或 Node.js。
+为 dogty/ldn_mitm 的免电脑 UDP 中继添加中文管理页面。Python **3.8+**，仅使用标准库，无须 pip 或 Node.js。
 
 功能：密码登录、在线客户端、真实收发流量、最近两分钟流量图、协议会话标识、运行日志、可选 IP/CIDR 白名单。客户端 60 秒无流量后从页面移除。统计、日志和登录会话保存在内存中，重启清零。**不识别游戏名称，不提供游戏房间列表，也不证明游戏已成功联机。** 当前不提供网页修改服务器设置或重启服务，配置通过环境变量与 systemd/Docker 管理。
 
@@ -65,7 +65,7 @@ export ALLOWED_CLIENTS="你家公网IP/32,她家公网IP/32"
 
 ## Ubuntu/Debian 开机自启
 
-需要 Python 3.10+（例如 Ubuntu 22.04/24.04）。在 `/opt/ldn-relay-admin` 放置完整项目。
+需要 Python 3.8+（例如 Ubuntu 20.04/22.04/24.04）。在 `/opt/ldn-relay-admin` 放置完整项目。
 
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin ldn-relay

@@ -1,4 +1,4 @@
-"""Private web dashboard for the dogty ldn_mitm UDP relay. Python 3.10+."""
+"""Private web dashboard for the dogty ldn_mitm UDP relay. Python 3.8+."""
 import collections
 import hashlib
 import hmac
