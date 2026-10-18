@@ -10,6 +10,8 @@ Group=ldn-relay
 WorkingDirectory=/opt/ldn-relay-admin
 EnvironmentFile=/etc/ldn-relay-admin.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+StateDirectory=ldn-relay-admin
+Environment=GAME_NAMES_FILE=/var/lib/ldn-relay-admin/game_names.json
 ExecStart=/usr/bin/python3 -u /opt/ldn-relay-admin/app.py
 Restart=on-failure
 RestartSec=5

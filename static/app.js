@@ -4,6 +4,29 @@ const duration = n => n>=86400 ? `${Math.floor(n/86400)} 天` : `${Math.floor(n/
 let last=null;
 function showLogin(){ $('login').hidden=false; $('dashboard').hidden=true; last=null; }
 function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);}
+function node(tag,cls,text){const el=document.createElement(tag);el.className=cls;if(text!==undefined)el.textContent=text;return el;}
+function renderRooms(rooms,advertisements){
+  const online=rooms.filter(r=>r.status==='online');$('room-badge').textContent=online.length;
+  $('room-summary').textContent=`${online.length} 个在线房间 · ${online.reduce((n,r)=>n+r.current_nodes,0)} 台房间内主机 · 已解析 ${advertisements} 条广播`;
+  const list=$('room-list');list.replaceChildren();$('rooms-empty').hidden=rooms.length>0;
+  for(const room of rooms){
+    const card=node('article','room-card'+(room.status==='stale'?' stale':''));
+    const top=node('div','room-top'),title=node('div','room-title');title.append(node('h3','',room.game_name));
+    const rename=node('button','quiet small-button',room.game_name_known?'修改名称':'标注游戏');
+    rename.addEventListener('click',async()=>{
+      const name=window.prompt(`为通信标识 ${room.lcid} 设置游戏名称（留空清除）：`,room.game_name_known?room.game_name:'');
+      if(name===null)return;
+      try{const r=await fetch('/api/game-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lcid:room.lcid,name})});const d=await r.json();if(!r.ok)throw Error(d.error);await refresh();}
+      catch(e){$('notice').hidden=false;$('notice').textContent=e.message;}
+    });title.append(rename);top.append(title,node('span','room-state',room.status==='online'?'● 广播在线':'○ 广播超时'));card.append(top);
+    card.append(node('div','room-id',`LCID ${room.lcid} · 房间 ${room.session.slice(0,12)}…`));
+    const stats=node('div','room-stats');stats.append(node('strong','',`${room.current_nodes} / ${room.max_nodes}`),node('span','',`台主机${room.status==='stale'?'（最近快照）':''} · 已加入 ${room.joined_nodes} 台，不含房主`));card.append(stats);
+    card.append(node('p','room-host',`房主 ${room.host_name} · ${room.host_endpoint} · ${Math.round(room.age_seconds)} 秒前更新`));
+    const members=node('div','members');for(const player of room.players){members.append(node('span',player.host?'member host':'member',`${player.host?'♛ ':''}${player.name}`));}card.append(members);
+    if(!room.membership_consistent)card.append(node('p','footnote','成员条目与广播人数暂不一致，等待下一次房主更新。'));
+    list.append(card);
+  }
+}
 function draw(history){
   const svg=$('chart'); svg.replaceChildren(); const ns='http://www.w3.org/2000/svg';
   const rates=history.slice(1).map((p,i)=>{const a=history[i],dt=Math.max(p.time-a.time,.01);return {rx:Math.max(0,(p.rx-a.rx)/dt),tx:Math.max(0,(p.tx-a.tx)/dt)};});
@@ -19,6 +42,7 @@ async function refresh(){
     $('health').textContent=d.running?'中继运行中':'中继未运行';$('light').classList.toggle('off',!d.running);
     $('count').textContent=d.clients.length;$('client-badge').textContent=d.clients.length;$('rx').textContent=format(d.bytes_rx);$('tx').textContent=format(d.bytes_tx);$('uptime').textContent=duration(d.uptime);$('port').textContent=`UDP ${d.port}`;
     $('access').textContent=d.allowlist_enabled?'◈ IP 白名单已启用':'◇ 未启用 IP 白名单';$('rejected').textContent=`白名单拒绝 ${d.rejected} 包`;
+    renderRooms(d.rooms||[],d.room_advertisements||0);
     const now=Date.now();if(last){const dt=(now-last.time)/1000;$('rx-rate').textContent=`${format(Math.max(0,(d.bytes_rx-last.rx)/dt))}/s · ${d.packets_rx} 包`;$('tx-rate').textContent=`${format(Math.max(0,(d.bytes_tx-last.tx)/dt))}/s · ${d.packets_tx} 包`;}
     last={time:now,rx:d.bytes_rx,tx:d.bytes_tx};const rows=$('client-rows');rows.replaceChildren();
     for(const c of d.clients){const tr=document.createElement('tr');[c.endpoint,c.virtual_ip||'等待学习',c.scope==='0'?'未进入会话':`0x${Number(c.scope).toString(16)}`,`${format(c.bytes_rx)} / ${format(c.bytes_tx)}`,`${c.idle_seconds.toFixed(0)} 秒前`].forEach(t=>cell(tr,t));rows.append(tr);}

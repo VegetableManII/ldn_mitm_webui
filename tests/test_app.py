@@ -5,6 +5,7 @@ from pathlib import Path
 import secrets
 import socket
 import subprocess
+import tempfile
 import sys
 import time
 import unittest
@@ -42,8 +43,10 @@ class IntegrationTests(unittest.TestCase):
         cls.web_port = free_port(socket.SOCK_STREAM)
         cls.udp_port = free_port(socket.SOCK_DGRAM)
         cls.password = secrets.token_urlsafe(24)
+        cls.temp = tempfile.TemporaryDirectory()
         env = dict(os.environ, ADMIN_PASSWORD=cls.password, WEB_PORT=str(cls.web_port),
-                   RELAY_PORT=str(cls.udp_port), WEB_BIND="127.0.0.1", ALLOWED_CLIENTS="127.0.0.1/32")
+                   RELAY_PORT=str(cls.udp_port), WEB_BIND="127.0.0.1", ALLOWED_CLIENTS="127.0.0.1/32",
+                   GAME_NAMES_FILE=str(Path(cls.temp.name) / "names.json"))
         cls.process = subprocess.Popen([sys.executable, "-u", "app.py"],
                                        cwd=Path(__file__).resolve().parents[1], env=env,
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -57,12 +60,14 @@ class IntegrationTests(unittest.TestCase):
             time.sleep(.05)
         cls.process.terminate()
         cls.process.wait(timeout=5)
+        cls.temp.cleanup()
         raise RuntimeError("Test service failed to start")
 
     @classmethod
     def tearDownClass(cls):
         cls.process.terminate()
         cls.process.wait(timeout=5)
+        cls.temp.cleanup()
 
     @classmethod
     def request(cls, method, path, body=None, headers=None):
@@ -119,6 +124,24 @@ class IntegrationTests(unittest.TestCase):
             status = json.loads(self.request("GET", "/api/status", headers={"Cookie": cookie})[2])
             self.assertGreaterEqual(status["packets_tx"], 2)
             self.assertTrue(any(c["virtual_ip"] == "10.13.1.1" and c["scope"] == "42" for c in status["clients"]))
+
+    def test_room_end_to_end_and_name_auth(self):
+        from test_rooms import advertisement
+        self.assertEqual(self.request("POST", "/api/game-name", {"lcid": "1020304050607080", "name": "测试"})[0], 401)
+        cookie = self.login()
+        headers = {"Cookie": cookie}
+        self.assertEqual(self.request("POST", "/api/game-name", {"lcid": "1020304050607080", "name": "联机测试"}, headers)[0], 200)
+        self.assertEqual(self.request("POST", "/api/game-name", {"lcid": "bad", "name": "x"}, headers)[0], 400)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as host:
+            host.bind(("127.0.0.1", 0))
+            host.sendto(advertisement(compressed=True), ("127.0.0.1", self.udp_port))
+            for _ in range(30):
+                status = json.loads(self.request("GET", "/api/status", headers=headers)[2])
+                if status["rooms"]:
+                    break
+                time.sleep(.02)
+            self.assertEqual(status["rooms"][0]["game_name"], "联机测试")
+            self.assertEqual(status["rooms"][0]["current_nodes"], 2)
 
 
 if __name__ == "__main__":

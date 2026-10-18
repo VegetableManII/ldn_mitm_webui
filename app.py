@@ -16,13 +16,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from urllib.parse import urlsplit
+from rooms import Rooms
 
 ROOT = Path(__file__).resolve().parent
 LOG = logging.getLogger("relay")
 
 
 class Monitor(logging.Handler):
-    def __init__(self, allowed=""):
+    def __init__(self, allowed="", names_file=None):
         super().__init__()
         self.lock = threading.RLock()
         self.started = time.time()
@@ -33,6 +34,7 @@ class Monitor(logging.Handler):
         self.rx = self.tx = self.packets_rx = self.packets_tx = self.rejected = 0
         self.running = False
         self.error = None
+        self.discovery = Rooms(names_file)
 
     def permits(self, ip):
         return not self.networks or any(ipaddress.ip_address(ip) in n for n in self.networks)
@@ -55,6 +57,7 @@ class Monitor(logging.Handler):
                                     or (data[0] == 3 and len(data) >= 17))
             if not valid:
                 return
+            self.discovery.observe(data, f"{addr[0]}:{addr[1]}", now)
             for key in list(self.clients):
                 if now - self.clients[key]["last_seen"] > 60:
                     del self.clients[key]
@@ -96,7 +99,9 @@ class Monitor(logging.Handler):
                     "bytes_rx": self.rx, "bytes_tx": self.tx,
                     "packets_rx": self.packets_rx, "packets_tx": self.packets_tx,
                     "rejected": self.rejected, "allowlist_enabled": bool(self.networks),
-                    "events": list(self.events), "history": list(self.history)}
+                    "events": list(self.events), "history": list(self.history),
+                    "rooms": self.discovery.snapshot(now),
+                    "room_advertisements": self.discovery.advertisements}
 
 
 class TrackedSocket:
@@ -222,6 +227,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "请求来源不匹配"})
         if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
             return self.reply(415, {"error": "需要 JSON 请求"})
+        if path == "/api/game-name":
+            if not self.session():
+                return self.reply(401, {"error": "请先登录"})
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                if not 1 <= length <= 2048:
+                    raise ValueError("请求大小无效")
+                data = json.loads(self.rfile.read(length))
+                with self.server.monitor.lock:
+                    self.server.monitor.discovery.set_name(data.get("lcid", ""), data.get("name", ""))
+            except (ValueError, AttributeError) as exc:
+                return self.reply(400, {"error": str(exc)})
+            except OSError:
+                LOG.exception("无法保存游戏名称")
+                return self.reply(500, {"error": "无法保存名称，请检查游戏映射文件目录写权限"})
+            return self.reply(200, {"ok": True})
         if path == "/api/login":
             ip = self.client_address[0]
             now = time.time()
@@ -271,7 +292,8 @@ def main():
     web_port = int(os.getenv("WEB_PORT", "8080"))
     if not 1 <= port <= 65535 or not 1 <= web_port <= 65535:
         raise SystemExit("端口必须在 1–65535 之间")
-    monitor = Monitor(os.getenv("ALLOWED_CLIENTS", ""))
+    monitor = Monitor(os.getenv("ALLOWED_CLIENTS", ""),
+                      os.getenv("GAME_NAMES_FILE", str(ROOT / "data/game_names.json")))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     LOG.addHandler(monitor)
     server = AdminServer((os.getenv("WEB_BIND", "127.0.0.1"), web_port), monitor, port, password)

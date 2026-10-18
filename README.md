@@ -2,7 +2,11 @@
 
 为 dogty/ldn_mitm 的免电脑 UDP 中继添加中文管理页面。Python **3.8+**，仅使用标准库，无须 pip 或 Node.js。
 
-功能：密码登录、在线客户端、真实收发流量、最近两分钟流量图、协议会话标识、运行日志、可选 IP/CIDR 白名单。客户端 60 秒无流量后从页面移除。统计、日志和登录会话保存在内存中，重启清零。**不识别游戏名称，不提供游戏房间列表，也不证明游戏已成功联机。** 当前不提供网页修改服务器设置或重启服务，配置通过环境变量与 systemd/Docker 管理。
+功能：密码登录、游戏房间列表、房主与成员名称、当前主机数/主机上限、已加入主机数、在线客户端、真实流量图、事件日志、可选 IP/CIDR 白名单。房间从 LANDiscovery 广播解析，绝不以中继在线数冒充房间人数。协议数据只能说明房主广播的成员快照，不能证明实际游戏已顺利运行。
+
+游戏通信标识（LCID）不保证等于 Title ID；首次显示“未知游戏”，管理员可在房间卡片点“标注游戏”保存名称，下次同标识自动使用该名称。自定义游戏房间名不做猜测。人数是联网主机/节点数，含房主，不是同机玩家数。房间 30 秒无广播标记超时，2 分钟后移除。客户端 60 秒无流量后从列表移除。
+
+统计、房间快照、日志、登录会话在内存中，重启清零。只有游戏名称映射持久保存。网页不提供修改监听端口、客户端白名单或重启服务；这些仍通过环境变量及 systemd/Docker 管理。
 
 ## 快速启动
 
@@ -60,6 +64,7 @@ export ALLOWED_CLIENTS="你家公网IP/32,她家公网IP/32"
 | `WEB_PORT` | `8080` | 管理页面 TCP 端口 |
 | `ALLOWED_CLIENTS` | 空 | 允许使用中继的公网 IP/CIDR，逗号分隔 |
 | `COOKIE_SECURE` | `0` | HTTPS 反代访问设 `1`，SSH 隧道 HTTP 保持 `0` |
+| `GAME_NAMES_FILE` | `data/game_names.json` | 管理员标注的游戏名称映射文件；服务账户需拥有目录写权限 |
 
 程序不会自动读取 `.env`；systemd 通过 EnvironmentFile 加载，Docker Compose 会读取项目 `.env`。
 
@@ -80,6 +85,25 @@ sudo journalctl -u ldn-relay-admin -f
 ```
 
 项目文件需要允许 ldn-relay 用户读取。如果用户名已存在，不再执行 useradd。使用 UFW 的服务器可执行 `sudo ufw allow 11544/udp`；同时配置云平台安全组。不要在尚未放行 SSH 时直接开启 UFW。
+
+### 从旧版本更新
+
+旧 systemd 服务启用了只读文件系统保护，需要一并更新 service 文件，以便名称映射保存到 `/var/lib/ldn-relay-admin/game_names.json`。管理密码配置不受影响：
+
+```bash
+sudo git -C /opt/ldn-relay-admin pull --ff-only
+sudo cp /opt/ldn-relay-admin/deploy/ldn-relay-admin.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart ldn-relay-admin
+```
+
+Docker 更新：`docker compose up -d --build`。游戏名称保存在 relay-data 数据卷，更新不会丢失；不要使用 `docker compose down -v` 删除该卷。
+
+### 房间没有显示
+
+确认使用免电脑分支并在当前服务器创建本地联机房间；仅连接 Wi-Fi 或中继不等于开房。该分支房主约每 5 秒广播一次，成员变化也会发送 SyncNetwork。页面应显示已解析广播条数。支持原始 IPv4、该分支的 IPv4 包装分片和零字节游程压缩，未知协议忽略，不影响原有转发。
+
+目前用源码布局构造的协议样本及实际本机 UDP→API 链路做了测试，仍需要用你两台实机验证网站二进制与该源码的布局完全一致。若只有在线客户端没有房间，不要先换系统，先查看游戏是否进入正确模式及插件日志。
 
 ## Docker
 
