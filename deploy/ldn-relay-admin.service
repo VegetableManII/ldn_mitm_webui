@@ -1,0 +1,24 @@
+[Unit]
+Description=Private LDN UDP Relay and Web Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ldn-relay
+Group=ldn-relay
+WorkingDirectory=/opt/ldn-relay-admin
+EnvironmentFile=/etc/ldn-relay-admin.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -u /opt/ldn-relay-admin/app.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

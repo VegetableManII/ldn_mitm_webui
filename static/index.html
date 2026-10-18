@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LDN · 私人中继</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<section id="login" class="login"><form id="login-form"><div class="brand">◈ LDN RELAY</div><h1>你的私人联机站。</h1><p>登录查看连接、会话与中继运行状态。</p><label for="password">管理密码</label><input id="password" type="password" autocomplete="current-password" required minlength="12"><button type="submit">进入控制台 <span>↗</span></button><p id="login-error" role="alert"></p><small>仅供管理者访问 · Switch 无需登录此页面</small></form></section>
+<div id="dashboard" hidden>
+<aside><a class="brand" href="/">◈ LDN RELAY</a><div class="side-label">PRIVATE NETWORK</div><a class="nav active" href="#overview">◉ 运行概览</a><a class="nav" href="#clients">▣ 在线客户端</a><a class="nav" href="#logs">≡ 事件日志</a><div class="side-bottom"><span id="access">访问策略</span><small>你的联机，只走自己的线路。</small></div></aside>
+<main><header><span>控制台 / 概览</span><button id="logout" class="quiet">退出登录 ↗</button></header>
+<section id="overview" class="hero"><div><div class="eyebrow">YOUR PRIVATE LAN, EVERYWHERE</div><h1>一起玩，距离不设限。</h1><p>实时查看 Switch 连接与 UDP 中继流量。</p></div><div class="status"><i id="light"></i><span id="health">正在连接</span></div></section>
+<div id="notice" class="notice" hidden role="alert"></div>
+<section class="cards"><article><div>在线客户端 <span>↗</span></div><strong id="count">—</strong><small>过去 60 秒内有协议流量</small></article><article><div>入站流量 <span>↓</span></div><strong id="rx">—</strong><small id="rx-rate">累计接收</small></article><article><div>出站流量 <span>↑</span></div><strong id="tx">—</strong><small id="tx-rate">累计发送</small></article><article><div>服务运行时间 <span>◷</span></div><strong id="uptime">—</strong><small id="port">UDP 11544</small></article></section>
+<section class="chart panel"><div class="section-heading"><div><h2>线路流量</h2><p>最近两分钟 · 每 2 秒更新</p></div><div class="legend"><span>● 接收</span><span>● 发送</span></div></div><svg id="chart" viewBox="0 0 900 140" preserveAspectRatio="none" role="img" aria-label="最近流量变化"></svg><div class="chart-foot"><span>2 分钟前</span><span id="chart-scale">等待流量</span><span>现在</span></div></section>
+<section id="clients" class="panel"><div class="section-heading"><div><h2>在线客户端 <b id="client-badge">0</b></h2><p>公网端点与游戏虚拟地址，自动清理离线状态。</p></div><span class="live">● LIVE</span></div><div class="table-wrap"><table><thead><tr><th>客户端端点</th><th>虚拟地址</th><th>会话标识</th><th>接收 / 发送</th><th>最后活动</th></tr></thead><tbody id="client-rows"></tbody></table></div><div id="empty" class="empty">等待第一台 Switch 接入。<small>在 ldn 菜单中选择你的服务器，并打开游戏的本地联机。</small></div><p class="footnote">会话标识来自中继协议，不代表游戏名、房间名或已成功联机。公网端点也可能随 NAT 改变。</p></section>
+<section id="logs" class="panel"><div class="section-heading"><div><h2>最近事件</h2><p>保留最近 150 条 · 不记录游戏数据包内容</p></div><span id="rejected" class="muted">拒绝 0 包</span></div><div id="event-list"></div></section>
+<footer><span>LDN RELAY / PRIVATE CONSOLE</span><span id="updated">等待数据</span></footer></main></div>
+</body></html>
