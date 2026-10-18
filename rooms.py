@@ -13,7 +13,7 @@ import tempfile
 import time
 
 ROOM_TIMEOUT = 30
-ROOM_RETENTION = 120
+ROOM_RETENTION = ROOM_TIMEOUT
 MAX_PACKET = 4096
 
 

@@ -2,12 +2,37 @@ import socket
 import threading
 import time
 import unittest
+from pathlib import Path
 
 from app import Monitor, TrackedSocket
+from app import game_names_path
+from unittest.mock import patch
 from test_rooms import advertisement
 
 
 class ObserverTests(unittest.TestCase):
+    def test_systemd_names_path_and_expired_cached_rooms(self):
+        with patch.dict("os.environ", {"STATE_DIRECTORY": "/var/lib/ldn-relay-admin"}, clear=True):
+            self.assertEqual(Path(game_names_path()), Path("/var/lib/ldn-relay-admin/game_names.json"))
+        with patch.dict("os.environ", {"GAME_NAMES_FILE": "/custom/names.json", "STATE_DIRECTORY": "/state"}, clear=True):
+            self.assertEqual(game_names_path(), "/custom/names.json")
+        monitor = Monitor()
+        monitor.room_cache = [{"last_seen": time.time() - 31}]
+        # Emulate another thread holding the room parser lock so cache is used.
+        entered, release = threading.Event(), threading.Event()
+        def hold():
+            with monitor.discovery_lock:
+                entered.set()
+                release.wait(2)
+        thread = threading.Thread(target=hold)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertEqual(monitor.snapshot(11544)["rooms"], [])
+        finally:
+            release.set()
+            thread.join(2)
+
     def test_bounded_queue_and_game_filter(self):
         monitor = Monitor()
         addr = ("127.0.0.1", 12345)

@@ -17,10 +17,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from urllib.parse import urlsplit
-from rooms import Rooms
+from rooms import Rooms, ROOM_TIMEOUT
 
 ROOT = Path(__file__).resolve().parent
 LOG = logging.getLogger("relay")
+
+
+def game_names_path():
+    explicit = os.getenv("GAME_NAMES_FILE")
+    if explicit:
+        return explicit
+    state = os.getenv("STATE_DIRECTORY", "").split(":")[0]
+    return str(Path(state) / "game_names.json") if state else str(ROOT / "data/game_names.json")
 
 
 class Monitor(logging.Handler):
@@ -154,7 +162,8 @@ class Monitor(logging.Handler):
                     "packets_rx": self.packets_rx, "packets_tx": self.packets_tx,
                     "rejected": self.rejected, "allowlist_enabled": bool(self.networks),
                     "events": list(self.events), "history": list(self.history),
-                    "rooms": self.room_cache,
+                    "rooms": [dict(room, age_seconds=round(max(0, now - room["last_seen"]), 1))
+                              for room in self.room_cache if now - room["last_seen"] <= ROOM_TIMEOUT],
                     "room_advertisements": self.advertisement_cache,
                     "room_observer": {"queued": self.observations.qsize(),
                                       "dropped": self.observation_dropped,
@@ -306,7 +315,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(400, {"error": str(exc)})
             except OSError:
                 LOG.exception("无法保存游戏名称")
-                return self.reply(500, {"error": "无法保存名称，请检查游戏映射文件目录写权限"})
+                return self.reply(500, {"error": "游戏名称目录不可写。systemd 部署请更新 service 文件、执行 daemon-reload 并重启；名称应保存到 /var/lib/ldn-relay-admin，而不是 /opt。不要关闭 ProtectSystem。"})
             return self.reply(200, {"ok": True})
         if path == "/api/login":
             ip = self.client_address[0]
@@ -357,8 +366,7 @@ def main():
     web_port = int(os.getenv("WEB_PORT", "8080"))
     if not 1 <= port <= 65535 or not 1 <= web_port <= 65535:
         raise SystemExit("端口必须在 1–65535 之间")
-    monitor = Monitor(os.getenv("ALLOWED_CLIENTS", ""),
-                      os.getenv("GAME_NAMES_FILE", str(ROOT / "data/game_names.json")))
+    monitor = Monitor(os.getenv("ALLOWED_CLIENTS", ""), game_names_path())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     LOG.addHandler(monitor)
     server = AdminServer((os.getenv("WEB_BIND", "0.0.0.0"), web_port), monitor, port, password)
