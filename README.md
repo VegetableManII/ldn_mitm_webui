@@ -26,9 +26,9 @@ export RELAY_PORT=11544
 python3 -u app.py
 ```
 
-管理页面默认仅监听服务器 `127.0.0.1:8080`，不暴露公网。公网放行 **UDP 11544**；不是 TCP 11544。
+管理页面默认监听 `0.0.0.0:8080`，可用服务器公网 IP 访问。需要在云安全组放行 **TCP 8080**（建议只允许管理者 IP）；游戏中继另行放行 **UDP 11544**。网页仍需管理密码，长期使用建议配置 HTTPS。
 
-在你自己的电脑开 SSH 隧道（保持窗口运行）：
+如果希望管理页面只走 SSH 隧道，将 `WEB_BIND=127.0.0.1`，然后在你自己的电脑开隧道（保持窗口运行）：
 
 ```bash
 ssh -N -L 8080:127.0.0.1:8080 你的SSH用户名@服务器公网IP
@@ -66,7 +66,7 @@ export ALLOWED_CLIENTS="你家公网IP/32,她家公网IP/32"
 |---|---|---|
 | `ADMIN_PASSWORD` | 无 | 必填，至少 12 位，管理页面密码 |
 | `RELAY_PORT` | `11544` | 公网 UDP 中继端口 |
-| `WEB_BIND` | `127.0.0.1` | 管理页面绑定地址 |
+| `WEB_BIND` | `0.0.0.0` | 管理页面绑定地址；仅 SSH 隧道访问时设为 `127.0.0.1` |
 | `WEB_PORT` | `8080` | 管理页面 TCP 端口 |
 | `ALLOWED_CLIENTS` | 空 | 允许使用中继的公网 IP/CIDR，逗号分隔 |
 | `COOKIE_SECURE` | `0` | HTTPS 反代访问设 `1`，SSH 隧道 HTTP 保持 `0` |
@@ -120,7 +120,7 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Compose 的网页端口仅映射到宿主机 127.0.0.1，可照常使用 SSH 隧道。Docker 可能绕过主机 UFW 的常规规则，请同时用云安全组或 ALLOWED_CLIENTS 限制访问。
+Compose 网页端口默认映射到宿主机所有接口，可在 .env 设置 `WEB_BIND=127.0.0.1` 改为仅 SSH 隧道访问。Docker 可能绕过主机 UFW 的常规规则，请同时用云安全组或 ALLOWED_CLIENTS 限制访问。
 
 ## 检查与限制
 

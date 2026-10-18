@@ -361,7 +361,7 @@ def main():
                       os.getenv("GAME_NAMES_FILE", str(ROOT / "data/game_names.json")))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     LOG.addHandler(monitor)
-    server = AdminServer((os.getenv("WEB_BIND", "127.0.0.1"), web_port), monitor, port, password)
+    server = AdminServer((os.getenv("WEB_BIND", "0.0.0.0"), web_port), monitor, port, password)
     threading.Thread(target=start_relay, args=(monitor, port), daemon=True).start()
     def sample():
         while True:
