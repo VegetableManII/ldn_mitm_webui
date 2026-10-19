@@ -63,7 +63,11 @@ def main(argv=None):
     clients = {}
     # udp_endpoint -> (scope token, last_declared); absent/expired = unscoped
     scopes = {}
-    endpoints = set()
+    # Fixed memory budgets; never evict active mappings to admit a new one.
+    max_clients, max_per_endpoint, max_scopes = 4096, 64, 1024
+    last_cleanup = time.monotonic()
+    last_notice = last_cleanup
+    learned = rejected = 0
 
     def scope_of(ep, now):
         entry = scopes.get(ep)
@@ -112,11 +116,21 @@ def main(argv=None):
         if not data:
             continue
 
-        if addr not in endpoints:
-            endpoints.add(addr)
-            print(f"[relay] new client {addr[0]}:{addr[1]}  ({len(active_endpoints(time.time())) + 1} online)")
-
         now = time.time()
+        tick = time.monotonic()
+        if tick - last_cleanup >= 1:
+            for key, (_, seen) in list(clients.items()):
+                if now - seen > IDLE_TIMEOUT:
+                    del clients[key]
+            for ep, (_, seen) in list(scopes.items()):
+                if now - seen > SCOPE_TIMEOUT:
+                    del scopes[ep]
+            last_cleanup = tick
+        if tick - last_notice >= 30:
+            if learned or rejected:
+                print(f"[relay] state clients={len(clients)} scopes={len(scopes)} learned={learned} capacity_rejected={rejected}")
+            learned = rejected = 0
+            last_notice = tick
         msg_type, payload = data[0], data[1:]
 
         if msg_type == TYPE_KEEPALIVE:
@@ -137,6 +151,9 @@ def main(argv=None):
                 continue
             token = int.from_bytes(payload[0:4], "big")
             prev = scope_of(addr, now)
+            if addr not in scopes and len(scopes) >= max_scopes:
+                rejected += 1
+                continue
             scopes[addr] = (token, now)
             if token != prev:
                 # Re-key so unicast keeps working without waiting for a data frame.
@@ -165,9 +182,14 @@ def main(argv=None):
 
         token = scope_of(addr, now)
         prev = clients.get((token, src4))
+        if prev is None or prev[0] != addr:
+            endpoint_count = sum(1 for ep, _ in clients.values() if ep == addr)
+            if (prev is None and len(clients) >= max_clients) or endpoint_count >= max_per_endpoint:
+                rejected += 1
+                continue
         clients[(token, src4)] = (addr, now)
         if prev is None or prev[0] != addr:
-            print(f"[relay] learn {ip_str(src4)} (scope {token:#x}) -> {addr[0]}:{addr[1]}")
+            learned += 1
 
         if is_broadcast(dst4):
             # Discovery crosses scopes: a scanner is not in a session yet.
