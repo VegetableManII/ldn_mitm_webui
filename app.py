@@ -239,7 +239,28 @@ class AdminServer(ThreadingHTTPServer):
         self.sessions = {}
         self.attempts = {}
         self.auth_lock = threading.Lock()
+        self.trust_loopback_proxy = os.getenv("TRUST_LOOPBACK_PROXY", "0") == "1"
+        self.max_web_connections = int(os.getenv("WEB_MAX_CONNECTIONS", "32"))
+        if not 1 <= self.max_web_connections <= 128:
+            raise ValueError("WEB_MAX_CONNECTIONS must be between 1 and 128")
+        self.connection_slots = threading.BoundedSemaphore(self.max_web_connections)
         super().__init__(address, Handler)
+
+    def process_request(self, request, client_address):
+        if not self.connection_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.connection_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.connection_slots.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -319,6 +340,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if path == "/api/login":
             ip = self.client_address[0]
+            if self.server.trust_loopback_proxy and ip == "127.0.0.1":
+                forwarded = self.headers.get_all("X-Real-IP", [])
+                if len(forwarded) != 1:
+                    return self.reply(400, {"error": "Invalid proxy address"})
+                try:
+                    ip = str(ipaddress.ip_address(forwarded[0]))
+                except ValueError:
+                    return self.reply(400, {"error": "Invalid proxy address"})
             now = time.time()
             with self.server.auth_lock:
                 self.server.attempts = {k: v for k, v in self.server.attempts.items() if now - v[0] < 300}
@@ -353,7 +382,7 @@ class Handler(BaseHTTPRequestHandler):
             with self.server.auth_lock:
                 if "relay_session" in cookie:
                     self.server.sessions.pop(cookie["relay_session"].value, None)
-            self.reply(200, {"ok": True}, cookie="relay_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
+            self.reply(200, {"ok": True}, cookie="relay_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" + ("; Secure" if os.getenv("COOKIE_SECURE", "0") == "1" else ""))
         else:
             self.reply(404, {"error": "不存在"})
 
